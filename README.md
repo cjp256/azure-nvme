@@ -23,19 +23,11 @@ sudo reboot
 
 ## Links
 
-`/dev/disk/azure/os`
+`/dev/disk/azure/os`: Links to NVMe OS disk.
 
-Links to NVMe OS disk.
+`/dev/disk/azure/data/by-lun/<lun>`: Links to NVMe data disks by user-configured lun.
 
-`/dev/disk/azure/data/by-lun/<lun>`
+`/dev/disk/azure/data/by-nguid/<nguid>`: Links to NVMe data disks by nguid.
 
-Links to NVMe data disks by user-configured lun.
-
-`/dev/disk/azure/data/by-nguid/<nguid>`
-
-Links to NVMe data disks by nguid.
-
-`/dev/disk/azure/temp/by-nguid/<nguid>`
-
-Links to NVMe local temp/resource disks by nguid.
+`/dev/disk/azure/temp/by-nguid/<nguid>`: Links to NVMe local temp/resource disks by nguid.
 
