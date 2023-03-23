@@ -1,4 +1,4 @@
-# Experimental udev rules for Azure
+# Experimental udev rules for Azure NVMe devices
 
 ## Installation
 
