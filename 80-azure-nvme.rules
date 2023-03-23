@@ -18,7 +18,7 @@ GOTO="azure_nvme_end"
 LABEL="azure_nvme_asap_v1_start"
 ATTR{nguid}=="?*", SYMLINK+="disk/azure/data/by-nguid/$attr{nguid}"
 ATTR{nsid}=="1", SYMLINK+="disk/azure/os", GOTO="azure_nvme_asap_v1_end"
-ATTR{nsid}=="[2-9]|[2-9][0-9]", PROGRAM="/bin/sh -ec 'echo $((%s{nsid}-2))'", ENV{AZURE_LUN}="$result" SYMLINK+="disk/azure/data/by-lun/$env{AZURE_LUN}"
+ATTR{nsid}=="[2-9]|[1-9][0-9]", PROGRAM="/bin/sh -ec 'echo $((%s{nsid}-2))'", ENV{AZURE_LUN}="$result" SYMLINK+="disk/azure/data/by-lun/$env{AZURE_LUN}"
 GOTO="azure_nvme_end"
 
 LABEL="azure_nvme_end"
