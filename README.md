@@ -17,7 +17,7 @@ cat 80-azure-nvme.rules
 Install rules and reboot:
 
 ```
-sudo cp 80-azure-nvme.rules /lib/udev/rules.d/
+sudo cp 80-azure-nvme.rules /etc/udev/rules.d/
 sudo reboot
 ```
 
