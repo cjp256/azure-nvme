@@ -6,8 +6,9 @@ use nix::fcntl::open;
 use nix::fcntl::OFlag;
 use nix::sys::stat::Mode;
 use nix::unistd::close;
+use std::env;
 use std::path::Path;
-use std::ptr;
+use std::ptr::null_mut;
 
 const NVME_IOCTL_ADMIN_CMD: c_ulong = 0xC0484E41;
 
@@ -82,17 +83,17 @@ struct NvmeIdNs {
     vs: [u8; 3712],
 }
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("error: specify device");
         std::process::exit(1);
     }
 
-    let device: &Path = args[1].as_ref();
-    let fd = open(device, OFlag::O_RDONLY, Mode::empty()).unwrap();
+    let device = Path::new(&args[1]);
+    let fd = open(device, OFlag::O_RDONLY, Mode::empty())?;
 
-    let mut ns: *mut NvmeIdNs = ptr::null_mut();
+    let mut ns = null_mut::<NvmeIdNs>();
     let align = unsafe { sysconf(_SC_PAGESIZE) } as usize;
     let ret = unsafe {
         posix_memalign(
@@ -101,31 +102,29 @@ fn main() {
             std::mem::size_of::<NvmeIdNs>(),
         )
     };
+
     if ret != 0 {
-        eprintln!("error: posix_memalign failed");
-        std::process::exit(1);
+        Err("error: posix_memalign failed")?;
     }
 
-    let cmd = unsafe {
-        NvmeAdminCmd {
-            opcode: 0x06,
-            nsid: 1,
-            addr: ns as u64,
-            data_len: std::mem::size_of_val(&*ns) as u32,
-            ..Default::default()
-        }
+    let cmd = NvmeAdminCmd {
+        opcode: 0x06,
+        nsid: 1,
+        addr: ns as u64,
+        data_len: std::mem::size_of::<NvmeIdNs>() as u32,
+        ..Default::default()
     };
 
     let ret = unsafe { libc::ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd) };
     if ret < 0 {
-        eprintln!("error: ioctl failed");
-        std::process::exit(1);
+        Err("error: ioctl failed")?;
     }
-    close(fd).unwrap();
+
+    close(fd)?;
 
     let ns_ref = unsafe { &*ns };
     if ns_ref.vs[0] != 0 {
-        let vs_str = std::str::from_utf8(&ns_ref.vs).unwrap();
+        let vs_str = std::str::from_utf8(&ns_ref.vs)?;
         println!("{}", vs_str);
     } else {
         eprintln!("error: no identifier found");
@@ -134,4 +133,6 @@ fn main() {
     unsafe {
         libc::free(ns as *mut c_void);
     }
+
+    Ok(())
 }

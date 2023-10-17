@@ -9,6 +9,14 @@ edition = "2021"
 libc = "0.2.149"
 nix = { version = "0.27.1", features = ["fs", "ioctl"] }
 
+[profile.release]
+lto = true
+strip = true
+opt-level = "z"
+codegen-units = 1
+panic = "abort"
+
 [[bin]]
 name = "azure-nvme-id"
 path = "main.rs"
+
