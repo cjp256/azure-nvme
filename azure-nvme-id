@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import logging
+import os
+import re
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+from logging.handlers import SysLogHandler
+
+logger = logging.getLogger(__name__)
+
+
+def query_nvme_namespace(device: Path) -> str | None:
+    cmd = ["/usr/sbin/nvme", "id-ns", str(device), "-b"]
+    logger.debug("running command: %s", shlex.join(cmd))
+
+    proc = subprocess.run(cmd, capture_output=True, check=True)
+    vs = proc.stdout[384:1408]
+
+    logger.debug("vendor specific data: %r", vs)
+
+    # Terminate at first null byte.
+    vs = vs.split(b"\x00", 1)[0]
+    if not vs:
+        return None
+
+    # Decode string
+    decoded_vs = vs.decode("utf-8", errors="strict")
+
+    logger.debug("vendor specific data string: %r", decoded_vs)
+    return decoded_vs
+
+
+def list_nvme_namespace_devices() -> list[str]:
+    namespaces = []
+    try:
+        for device in os.listdir("/dev"):
+            if re.match(r"nvme[0-9]+n[0-9]+$", device):
+                namespaces.append(f"/dev/{device}")
+    except FileNotFoundError:
+        pass
+
+    return namespaces
+
+
+def parse_vs(vs: str) -> dict[str, str]:
+    properties = {"vs": vs}
+    for kv in vs.split(","):
+        kv = kv.strip()
+        logger.debug("processing: %r", kv)
+        k, v = kv.split("=")
+        properties[k] = v
+
+    return properties
+
+
+def determine_device_type(device: Path) -> str:
+    sys_device = device.name
+    sys_path = Path("/sys/class/block", sys_device, "device/model")
+    model = sys_path.read_text().strip()
+    logger.debug("device model for %s: %s", device, model)
+    if model in ["Microsoft NVMe Direct Disk", "Microsoft NVMe Direct Disk v2"]:
+        return "local"
+
+    return "unknown"
+
+
+def configure_logger():
+    logger.setLevel(logging.DEBUG)
+    syslog_handler = SysLogHandler(address='/dev/log')
+    formatter = logging.Formatter('azure-nvme-id: %(message)s')
+    syslog_handler.setFormatter(formatter)
+    logger.addHandler(syslog_handler)
+
+
+def handle_error(message: str):
+    logger.error(message)
+    print(message, file=sys.stderr)
+    sys.exit(1)
+
+
+def handle_output(message: str):
+    logger.debug(message)
+    print(message)
+
+
+def run_identify(devices: list[str], args):
+    if not devices:
+        handle_error("error: no namespace devices found")
+        return
+
+    if args.output == "raw" and len(devices) != 1:
+        handle_error("error: raw output format only supported for one device")
+        return
+
+    results: dict[str, dict[str, str]] = {}
+    for device in devices:
+        device_path = Path(device)
+        logger.debug("checking: %s", device_path)
+        if not device_path.exists():
+            handle_error(f"error: device {device!r} not found")
+
+        vs_id = query_nvme_namespace(device_path)
+        if vs_id is None:
+            device_type = determine_device_type(device_path)
+            results[device] = {"type": device_type}
+            continue
+
+        results[device] = parse_vs(vs_id)
+
+    if args.output == "json":
+        out = json.dumps(results, indent=4, sort_keys=True)
+        handle_output(out)
+    elif args.output == "raw":
+        properties = list(results.values())[0]
+        out = properties["vs"]
+        handle_output(out)
+    elif args.output == "plain":
+        for device, properties in results.items():
+            device_type = properties["type"]
+            vs = properties.get("vs", f"type={device_type}")
+            out = f"{device}: {vs}"
+            handle_output(out)
+
+
+def run_parse(args):
+    vs = parse_vs(args.vs)
+    value = vs.get(args.key)
+    if value is None:
+        handle_error(f"error: property {args.key} not found in {args.vs}")
+        return
+    handle_output(value)
+
+
+def main():
+    configure_logger()
+    logger.debug("started: %s", shlex.join(sys.argv))
+    logger.debug("os.environ: %r", os.environ)
+    system_namespaces = list_nvme_namespace_devices()
+    logger.debug("system namespaces: %r", system_namespaces)
+
+    parser = argparse.ArgumentParser(description="Azure NVMe Device Identifier")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debugging",
+        required=False,
+        default=False,
+    )
+
+    subparsers = parser.add_subparsers(dest="subcommand", required=True)
+
+    identify_parser = subparsers.add_parser("identify", help="identify namespace")
+    identify_parser.add_argument(
+        "--device",
+        dest="devices",
+        type=str,
+        action="append",
+        help="namespace device(s)",
+        choices=system_namespaces,
+        required=False,
+    )
+    identify_parser.add_argument(
+        "-o",
+        "--output",
+        help="output format",
+        required=False,
+        default="plain",
+        choices=["json", "plain", "raw"],
+    )
+    identify_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="enable debugging",
+        required=False,
+        default=False,
+    )
+
+    parse_parser = subparsers.add_parser(
+        "parse", help="print Azure vendor-specific identifier property"
+    )
+    parse_parser.add_argument(
+        "--key",
+        type=str,
+        help="property key to parse, e.g. type",
+        required=True,
+    )
+    parse_parser.add_argument(
+        "--vs",
+        type=str,
+        help="vendor-specific identifer string, e.g. type=local,index=4,name=foo",
+        required=True,
+    )
+    parse_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="enable debugging",
+        required=False,
+        default=False,
+    )
+
+    args = parser.parse_args()
+    logger.debug("arguments: %r", args)
+
+    if args.subcommand == "identify":
+        devices = args.devices if args.devices else system_namespaces
+        run_identify(devices, args)
+    elif args.subcommand == "parse":
+        run_parse(args)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as error:
+        logger.exception("caught exception: %r", error)
+        raise
