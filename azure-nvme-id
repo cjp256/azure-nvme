@@ -152,7 +152,7 @@ def main():
         default=False,
     )
 
-    subparsers = parser.add_subparsers(dest="subcommand", required=True)
+    subparsers = parser.add_subparsers(dest="subcommand", required=False, default="identify")
 
     identify_parser = subparsers.add_parser("identify", help="identify namespace")
     identify_parser.add_argument(
