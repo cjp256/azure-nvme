@@ -60,16 +60,15 @@ struct nvme_id_ns {
 
 #define MAX_PATH 4096
 
-struct nvme_namespace {
-    const char path[MAX_PATH];
-    const char controller_path[MAX_PATH];
-    const char name[512];
-    const char model[512];
-    const char vs[3712];
+struct nvme_controller {
+    char name[256];
+    char dev_path[MAX_PATH];
+    char sys_path[MAX_PATH];
+    char model[MAX_PATH];
 };
 
-bool debug = false;
-bool udev_mode = false;
+static bool debug = false;
+static bool udev_mode = false;
 
 #define DEBUG_PRINTF(fmt, ...)                                                 \
     do {                                                                       \
@@ -205,6 +204,7 @@ int is_azure_nvme_controller(const struct dirent *entry) {
     // Vendor ID must be "0x1414".
     snprintf(vendor_id_path, sizeof(vendor_id_path),
              "/sys/class/nvme/%s/device/vendor", entry->d_name);
+
     vendor_id = read_file_as_string(vendor_id_path);
     if (vendor_id == NULL || strncmp(vendor_id, "0x1414", 6) != 0) {
         is_azure_nvme = false;
@@ -231,26 +231,24 @@ int is_nvme_namespace(const struct dirent *entry) {
 /**
  * Enumerate namespaces for a controller.
  */
-int enumerate_namespaces_for_controller(const char *name) {
+int enumerate_namespaces_for_controller(struct nvme_controller *ctrl) {
     struct dirent **namelist;
-    char sys_path[MAX_PATH];
 
-    snprintf(sys_path, sizeof(sys_path), "/sys/class/nvme/%s", name);
-    int n = scandir(sys_path, &namelist, is_nvme_namespace, alphasort);
+    int n = scandir(ctrl->sys_path, &namelist, is_nvme_namespace, alphasort);
     if (n < 0) {
         perror("scandir");
         return 1;
     }
 
-    DEBUG_PRINTF("found %d namespace(s) for controller=%s:\n", n, name);
+    DEBUG_PRINTF("found %d namespace(s) for controller=%s:\n", n, ctrl->name);
     for (int i = 0; i < n; i++) {
-        char path[MAX_PATH];
+        char namespace_path[MAX_PATH];
         const char *vs = NULL;
 
-        snprintf(path, sizeof(path), "/dev/%s", namelist[i]->d_name);
-        vs = query_namespace_vs(path);
+        snprintf(namespace_path, sizeof(namespace_path), "/dev/%s", namelist[i]->d_name);
+        vs = query_namespace_vs(namespace_path);
 
-        printf("%s: %s\n", path, vs);
+        printf("%s: %s\n", namespace_path, vs);
         free(namelist[i]);
     }
 
@@ -273,7 +271,13 @@ int enumerate_azure_nvme_controllers() {
 
     DEBUG_PRINTF("found %d controllers\n", n);
     for (int i = 0; i < n; i++) {
-        enumerate_namespaces_for_controller(namelist[i]->d_name);
+        struct nvme_controller ctrl;
+        strncpy(ctrl.name, namelist[i]->d_name, sizeof(ctrl.name));
+        snprintf(ctrl.dev_path, sizeof(ctrl.dev_path), "/dev/%s", ctrl.name);
+        snprintf(ctrl.sys_path, sizeof(ctrl.sys_path), "/sys/class/nvme/%s",
+                 ctrl.name);
+
+        enumerate_namespaces_for_controller(&ctrl);
         free(namelist[i]);
     }
 
